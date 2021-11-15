@@ -34,8 +34,11 @@ class EMIController extends Controller
         // Calulcate Monthly EMI
         if($sanitized['instalment_type'] == 'monthly'){
             $months = $this->calculateMonths($sanitized['booking_date'], $sanitized['checkin_date']);
+
+            // monthly EMI Should be completed before 14 days of checkin.
             $installmentMonths = $months - 2;
 
+            // First EMI Should be 25 % of total amount.
             $firstEMIAmount = (25 / 100) * $sanitized['amount'];
             $remainingEMIAmount = $sanitized['amount'] - $firstEMIAmount;
 
@@ -59,7 +62,69 @@ class EMIController extends Controller
                     'amount'   => number_format($EMIAmount, 2),
                 ];
             }
-        }
+
+        } else if($sanitized['instalment_type'] == 'weekly'){
+            $weeks = $this->datediffInWeeks($sanitized['booking_date'], $sanitized['checkin_date']);
+
+            // First EMI Should be 25 % of total amount.
+            $firstEMIAmount = (25 / 100) * $sanitized['amount'];
+            $remainingEMIAmount = $sanitized['amount'] - $firstEMIAmount;
+
+            $installmentWeeks = $weeks - 2;
+
+            if($installmentWeeks <= 0){
+                return $this->errorResponse("Weekly Emi is not available!");
+            }
+
+            $EMIAmount = $remainingEMIAmount / $installmentWeeks;
+            $firstEMIDate = date("Y-m-d", strtotime("+7 days", $your_date));
+
+            $installment[] = [
+                'emi_date' => $firstEMIDate,
+                'amount'   => (string) $firstEMIAmount,
+            ];
+
+            $nextEMIDate = $firstEMIDate;
+
+            for ($i = 0; $i < $installmentWeeks; $i++) {
+                $nextEMIDate = date("Y-m-d", strtotime("+7 days", strtotime($nextEMIDate)));
+                $installment[] = [
+                    'emi_date' => $nextEMIDate,
+                    'amount'   => number_format($EMIAmount, 2),
+                ];
+            }
+
+        } else if($sanitized['instalment_type'] == 'biweekly'){
+            $weeks = $this->datediffInBweeks($sanitized['booking_date'], $sanitized['checkin_date']);
+
+            // First EMI Should be 25 % of total amount.
+            $firstEMIAmount = (25 / 100) * $sanitized['amount'];
+            $remainingEMIAmount = $sanitized['amount'] - $firstEMIAmount;
+
+            $installmentWeeks = $weeks - 2;
+
+            if($installmentWeeks <= 0){
+                return $this->errorResponse("Weekly Emi is not available!");
+            }
+
+            $EMIAmount = $remainingEMIAmount / $installmentWeeks;
+            $firstEMIDate = date("Y-m-d", strtotime("+15 days", $your_date));
+
+            $installment[] = [
+                'emi_date' => $firstEMIDate,
+                'amount'   => (string) $firstEMIAmount,
+            ];
+
+            $nextEMIDate = $firstEMIDate;
+
+            for ($i = 0; $i < $installmentWeeks; $i++) {
+                $nextEMIDate = date("Y-m-d", strtotime("+15 days", strtotime($nextEMIDate)));
+                $installment[] = [
+                    'emi_date' => $nextEMIDate,
+                    'amount'   => number_format($EMIAmount, 2),
+                ];
+            }
+        } 
 
         $emiData = [
             'emi_available' => true,
@@ -67,6 +132,18 @@ class EMIController extends Controller
         ];
 
         return response()->json($emiData);
+    }
+
+    function datediffInWeeks($date1, $date2)
+    {
+        $diff = strtotime($date2, 0) - strtotime($date1, 0);
+        return floor($diff / 604800);
+    }
+
+    function datediffInBweeks($date1, $date2)
+    {
+        $diff = strtotime($date2, 0) - strtotime($date1, 0);
+        return floor($diff / 1296000);
     }
 
     function calculateMonths($bookingDate, $checkinDate){
@@ -84,3 +161,8 @@ class EMIController extends Controller
         return $diff;
     }
 }
+
+// get last date of EMI
+// $lastEMIDate = end($installment);
+// $datediff = strtotime($sanitized['checkin_date']) - strtotime($lastEMIDate['emi_date']);
+// $days = round($datediff / (60 * 60 * 24));

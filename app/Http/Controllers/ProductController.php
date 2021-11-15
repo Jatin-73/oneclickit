@@ -62,7 +62,7 @@ class ProductController extends Controller
         $catIds = array_unique($ids);
     
         $groupCategory = [];
-        foreach ($catIds as $cat) {
+        foreach ($catIds as $key => $cat) {
             $productsData = [];
             foreach($products as $pro){
                 if($pro->category_id === $cat){
@@ -72,6 +72,9 @@ class ProductController extends Controller
                         'product_cost' => $pro->product_cost,
                     ];
                     $categoryName = $pro->category_name;
+
+                    // To improve the code execution time
+                    unset($pro->$key);
                 }
             }
             $groupCategory[] = [
