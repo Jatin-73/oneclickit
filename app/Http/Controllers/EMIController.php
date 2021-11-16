@@ -7,125 +7,157 @@ use Validator;
 
 class EMIController extends Controller
 {
-    public function emiCalculation(Request $request)
+    public function emiCalculation(Request $request, $installment = [])
     {
         $validator = Validator::make($request->all(), [
-            'booking_date'    =>  'required',
-            'checkin_date'    =>  'required',
+            'booking_date'    =>  'required|date_format:Y-m-d|after_or_equal:now',
+            'checkin_date'    =>  'required|date_format:Y-m-d|after_or_equal:booking_date',
             'amount'          =>  'required|numeric',
-            'instalment_type' =>  'required|string',
+            'instalment_type' =>  'required|in:monthly,weekly,biweekly',
         ]);
 
         if ($validator->fails()) {
             return $this->errorResponse($validator->errors()->first());
         }
 
+        // Validate inputs
         $sanitized = $validator->valid();
 
         // If the Checkin date is within 30 days then Emi is not available
-        $your_date = strtotime($sanitized['booking_date']);
-        $datediff = strtotime($sanitized['checkin_date']) - $your_date;
+        $booking_date = strtotime($sanitized['booking_date']);
+        $datediff = strtotime($sanitized['checkin_date']) - strtotime($sanitized['booking_date']);
         $days = round($datediff / (60 * 60 * 24));
         if($days < 31){
             return $this->errorResponse("Emi is not available!");
         }
-        $installment = [];
+        
+        // All EMI Should be completed before 14 days of check-in
+        $checkin_date = date('Y-m-d', strtotime('-14 day', strtotime($sanitized['checkin_date'])));
 
         // Calulcate Monthly EMI
         if($sanitized['instalment_type'] == 'monthly'){
-            $months = $this->calculateMonths($sanitized['booking_date'], $sanitized['checkin_date']);
-
-            // monthly EMI Should be completed before 14 days of checkin.
-            $installmentMonths = $months - 2;
-
-            // First EMI Should be 25 % of total amount.
-            $firstEMIAmount = (25 / 100) * $sanitized['amount'];
-            $remainingEMIAmount = $sanitized['amount'] - $firstEMIAmount;
+            $installmentMonths = $this->datediffInMonths($sanitized['booking_date'], $checkin_date);
 
             if($installmentMonths <= 0){
-                return $this->errorResponse("Monthly Emi is not available!");
+                return $this->errorResponse("Monthly EMI is not available!");
             }
-            $EMIAmount = $remainingEMIAmount / $installmentMonths;
-            $firstEMIDate = date("Y-m-d", strtotime("+1 month", $your_date));
-
-            $installment[] = [
-                'emi_date' => $firstEMIDate,
-                'amount'   => (string) $firstEMIAmount,
-            ];
-
-            $nextEMIDate = $firstEMIDate;
-
-            for ($i = 0; $i < $installmentMonths; $i++) {
-                $nextEMIDate = date("Y-m-d", strtotime("+1 month", strtotime($nextEMIDate)));
-                $installment[] = [
-                    'emi_date' => $nextEMIDate,
-                    'amount'   => number_format($EMIAmount, 2),
-                ];
-            }
-
-        } else if($sanitized['instalment_type'] == 'weekly'){
-            $weeks = $this->datediffInWeeks($sanitized['booking_date'], $sanitized['checkin_date']);
 
             // First EMI Should be 25 % of total amount.
+            $totalAmount = $sanitized['amount'];
             $firstEMIAmount = (25 / 100) * $sanitized['amount'];
             $remainingEMIAmount = $sanitized['amount'] - $firstEMIAmount;
-
-            $installmentWeeks = $weeks - 2;
-
-            if($installmentWeeks <= 0){
-                return $this->errorResponse("Weekly Emi is not available!");
-            }
-
-            $EMIAmount = $remainingEMIAmount / $installmentWeeks;
-            $firstEMIDate = date("Y-m-d", strtotime("+7 days", $your_date));
-
-            $installment[] = [
-                'emi_date' => $firstEMIDate,
-                'amount'   => (string) $firstEMIAmount,
-            ];
-
+            $firstEMIDate = $sanitized['booking_date'];
             $nextEMIDate = $firstEMIDate;
 
-            for ($i = 0; $i < $installmentWeeks; $i++) {
-                $nextEMIDate = date("Y-m-d", strtotime("+7 days", strtotime($nextEMIDate)));
+            if($installmentMonths >= 1){
+                // Bind First EMI
                 $installment[] = [
-                    'emi_date' => $nextEMIDate,
-                    'amount'   => number_format($EMIAmount, 2),
+                    'emi_date' => $firstEMIDate,
+                    'amount'   => (string) number_format($firstEMIAmount, 2),
+                ];
+
+                // $installmentMonths = ($installmentMonths > 1) ? $installmentMonths : $installmentMonths;
+                $finalRemainingEMIAmount = $remainingEMIAmount / $installmentMonths;
+
+                // Bind Loop Throgh Remaining EMI
+                for ($i = 0; $i < $installmentMonths; $i++) {
+                    $nextEMIDate = date("Y-m-d", strtotime("+1 month", strtotime($nextEMIDate)));
+                    $installment[] = [
+                        'emi_date' => $nextEMIDate,
+                        'amount'   => number_format($finalRemainingEMIAmount, 2),
+                    ];
+                }
+            }else{
+                // Bind First EMI
+                $installment[] = [
+                    'emi_date' => $firstEMIDate,
+                    'amount'   => (string) $totalAmount,
                 ];
             }
+        }
+        // Calulcate Weekly EMI
+        else if($sanitized['instalment_type'] == 'weekly'){
+            $installmentWeeks = $this->datediffInBweeks($sanitized['booking_date'], $checkin_date);
 
-        } else if($sanitized['instalment_type'] == 'biweekly'){
-            $weeks = $this->datediffInBweeks($sanitized['booking_date'], $sanitized['checkin_date']);
+            if($installmentWeeks <= 0){
+                return $this->errorResponse("Weekly EMI is not available!");
+            }
 
             // First EMI Should be 25 % of total amount.
+            $totalAmount = $sanitized['amount'];
             $firstEMIAmount = (25 / 100) * $sanitized['amount'];
             $remainingEMIAmount = $sanitized['amount'] - $firstEMIAmount;
-
-            $installmentWeeks = $weeks - 2;
-
-            if($installmentWeeks <= 0){
-                return $this->errorResponse("Weekly Emi is not available!");
-            }
-
-            $EMIAmount = $remainingEMIAmount / $installmentWeeks;
-            $firstEMIDate = date("Y-m-d", strtotime("+15 days", $your_date));
-
-            $installment[] = [
-                'emi_date' => $firstEMIDate,
-                'amount'   => (string) $firstEMIAmount,
-            ];
-
+            $firstEMIDate = $sanitized['booking_date'];
             $nextEMIDate = $firstEMIDate;
 
-            for ($i = 0; $i < $installmentWeeks; $i++) {
-                $nextEMIDate = date("Y-m-d", strtotime("+15 days", strtotime($nextEMIDate)));
+            if($installmentWeeks >= 1){
+                // Bind First EMI
                 $installment[] = [
-                    'emi_date' => $nextEMIDate,
-                    'amount'   => number_format($EMIAmount, 2),
+                    'emi_date' => $firstEMIDate,
+                    'amount'   => (string) number_format($firstEMIAmount, 2),
+                ];
+
+                $finalRemainingEMIAmount = $remainingEMIAmount / $installmentWeeks;
+
+                // Bind Loop Throgh Remaining EMI
+                for ($i = 0; $i < $installmentWeeks; $i++) {
+                    $nextEMIDate = date("Y-m-d", strtotime("+7 days", strtotime($nextEMIDate)));
+                    $installment[] = [
+                        'emi_date' => $nextEMIDate,
+                        'amount'   => number_format($finalRemainingEMIAmount, 2),
+                    ];
+                }
+            }else{
+                // Bind First EMI
+                $installment[] = [
+                    'emi_date' => $firstEMIDate,
+                    'amount'   => (string) $totalAmount,
                 ];
             }
-        } 
+        }
 
+        // Calulcate 15 Days EMI
+        else if($sanitized['instalment_type'] == 'biweekly'){
+            $installmentBiweeks = $this->datediffInBweeks($sanitized['booking_date'], $checkin_date);
+
+            if($installmentBiweeks <= 0){
+                return $this->errorResponse("Weekly EMI is not available!");
+            }
+
+            // First EMI Should be 25 % of total amount.
+            $totalAmount = $sanitized['amount'];
+            $firstEMIAmount = (25 / 100) * $sanitized['amount'];
+            $remainingEMIAmount = $sanitized['amount'] - $firstEMIAmount;
+            $firstEMIDate = $sanitized['booking_date'];
+            $nextEMIDate = $firstEMIDate;
+
+            if($installmentBiweeks >= 1){
+                // Bind First EMI
+                $installment[] = [
+                    'emi_date' => $firstEMIDate,
+                    'amount'   => (string) number_format($firstEMIAmount, 2),
+                ];
+
+                $finalRemainingEMIAmount = $remainingEMIAmount / $installmentBiweeks;
+
+                // Bind Loop Throgh Remaining EMI
+                for ($i = 0; $i < $installmentBiweeks; $i++) {
+                    $nextEMIDate = date("Y-m-d", strtotime("+15 days", strtotime($nextEMIDate)));
+                    $installment[] = [
+                        'emi_date' => $nextEMIDate,
+                        'amount'   => number_format($finalRemainingEMIAmount, 2),
+                    ];
+                }
+            }else{
+                // Bind First EMI
+                $installment[] = [
+                    'emi_date' => $firstEMIDate,
+                    'amount'   => (string) $totalAmount,
+                ];
+            }
+        }
+
+        // Return EMI Data
         $emiData = [
             'emi_available' => true,
             'data'          => $installment,
@@ -146,7 +178,7 @@ class EMIController extends Controller
         return floor($diff / 1296000);
     }
 
-    function calculateMonths($bookingDate, $checkinDate){
+    function datediffInMonths($bookingDate, $checkinDate){
 
         $ts1 = strtotime($bookingDate);
         $ts2 = strtotime($checkinDate);
@@ -161,8 +193,3 @@ class EMIController extends Controller
         return $diff;
     }
 }
-
-// get last date of EMI
-// $lastEMIDate = end($installment);
-// $datediff = strtotime($sanitized['checkin_date']) - strtotime($lastEMIDate['emi_date']);
-// $days = round($datediff / (60 * 60 * 24));
